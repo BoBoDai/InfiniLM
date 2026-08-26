@@ -32,6 +32,8 @@ def parse_dtype(dtype_str: str):
         return infinicore.bfloat16
     elif dtype_str == "int8":
         return infinicore.int8
+    elif dtype_str == "fp8":
+        return infinicore.float8
     elif dtype_str == "int32":
         return infinicore.int32
     elif dtype_str == "int64":
@@ -77,6 +79,7 @@ def check_parameters(model_keys: list, already_loaded_keys: list):
         key
         for key in model_keys - intersection
         if not _is_internal_moe_packed_weight(key)
+        and not _is_optional_kv_cache_scale(key)
     }
     unexpected_keys = already_loaded_keys - intersection
     error_msgs: list[str] = []
@@ -98,6 +101,29 @@ def check_parameters(model_keys: list, already_loaded_keys: list):
         raise RuntimeError(
             "Error(s) in loading state_dict\n\t{}".format("\n\t".join(error_msgs))
         )
+
+
+def _is_optional_kv_cache_scale(key: str) -> bool:
+    """KV-cache quant scales default to 1.0 when absent from the checkpoint
+    (SGLang quantized-KV-cache convention), so they are not required keys."""
+    return key.endswith((".kv_cache_k_scale", ".kv_cache_v_scale"))
+
+
+def _remap_kv_cache_scale_keys(
+    state_dict: Dict[str, torch.Tensor],
+) -> Dict[str, torch.Tensor]:
+    """Map HF/compressed-tensors KV-cache quant scale keys to InfiniLM's
+    registered parameter names: ``<prefix>.self_attn.k_scale`` /
+    ``<prefix>.self_attn.v_scale`` -> ``<prefix>.self_attn.kv_cache_k_scale`` /
+    ``<prefix>.self_attn.kv_cache_v_scale``. Non-scale keys pass through."""
+    return {
+        (
+            key.replace(".self_attn.k_scale", ".self_attn.kv_cache_k_scale").replace(
+                ".self_attn.v_scale", ".self_attn.kv_cache_v_scale"
+            )
+        ): tensor
+        for key, tensor in state_dict.items()
+    }
 
 
 def load_state_dict(
@@ -252,6 +278,10 @@ def load_model_state_dict_by_file(
             if remapper is not None:
                 model_param = remapper(model_param, config=model.hf_config)
 
+            # Map KV-cache quant scale keys (k_scale/v_scale) to the registered
+            # parameter names (kv_cache_k_scale/kv_cache_v_scale)
+            model_param = _remap_kv_cache_scale_keys(model_param)
+
             # --------------------------------------------------------- #
             #         Scale embed_tokens on torch side before converting
             # --------------------------------------------------------- #
@@ -301,6 +331,10 @@ def load_model_state_dict_by_file(
         remapper = _WEIGHT_REMAPPER.get(model_type)
         if remapper is not None:
             model_params = remapper(model_params, config=model.hf_config)
+
+        # Map KV-cache quant scale keys (k_scale/v_scale) to the registered
+        # parameter names (kv_cache_k_scale/kv_cache_v_scale)
+        model_params = _remap_kv_cache_scale_keys(model_params)
 
         # Scale embed_tokens on torch side before converting
         if "model.embed_tokens.weight" in model_params:

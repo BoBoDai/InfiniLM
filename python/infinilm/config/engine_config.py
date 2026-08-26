@@ -67,6 +67,7 @@ class EngineConfig:
     weight_load_mode: str = "async"
     skip_load: bool = False
     use_legacy_moe: bool = False
+    kv_cache_dtype: Optional[str] = None
     kv_transfer_config: Optional[KVTransferConfig] = None
     enable_prefix_caching: bool = True
 

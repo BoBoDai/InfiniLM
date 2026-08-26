@@ -41,6 +41,7 @@ def test(
     use_legacy_moe=False,
     enable_prefix_caching=True,
     pre_transpose=False,
+    kv_cache_dtype=None,
 ):
     model_path = os.path.expanduser(model_path)
     # ---------------------------------------------------------------------------- #
@@ -77,6 +78,7 @@ def test(
         use_legacy_moe=use_legacy_moe,
         enable_prefix_caching=enable_prefix_caching,
         pre_transpose=pre_transpose,
+        kv_cache_dtype=kv_cache_dtype,
     )
 
     conversations = [
@@ -185,4 +187,5 @@ if __name__ == "__main__":
         use_legacy_moe=cfg.use_legacy_moe,
         enable_prefix_caching=cfg.enable_prefix_caching,
         pre_transpose=cfg.pre_transpose,
+        kv_cache_dtype=cfg.kv_cache_dtype,
     )

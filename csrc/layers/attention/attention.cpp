@@ -39,10 +39,12 @@ Attention::Attention(std::shared_ptr<infinilm::config::ModelConfig> model_config
     rotary_emb_ = infinilm::layers::rotary_embedding::get_rope(model_config, device);
 
     float scaling = 1.0f / std::sqrt(static_cast<float>(head_dim_));
+    // Create and register the KV cache quant scales BEFORE passing them to
+    // AttentionLayer: Parameter is a shared handle, so rebinding the members
+    // after construction would leave AttentionLayer with empty tensors.
+    init_kv_cache_quant_params(register_fn, device, kv_cache_k_scale_, kv_cache_v_scale_);
     attn_ = std::make_shared<AttentionLayer>(num_attention_heads_, head_dim_, scaling, num_key_value_heads_, layer_idx_,
                                              kv_cache_k_scale_, kv_cache_v_scale_, attention_backend_);
-
-    init_kv_cache_quant_params(register_fn, device, kv_cache_k_scale_, kv_cache_v_scale_);
 }
 
 infinicore::Tensor Attention::forward(const infinicore::Tensor &positions,
@@ -145,9 +147,15 @@ void init_kv_cache_quant_params(std::function<void(const std::string &, infinico
     case infinilm::quantization::KVQuantAlgo::NONE:
         break;
     case infinilm::quantization::KVQuantAlgo::INT8:
+    case infinilm::quantization::KVQuantAlgo::FP8_E4M3:
+        // Static per-tensor scale, default 1.0 (SGLang default when no scale is
+        // provided). A checkpoint that carries k_scale/v_scale (e.g.
+        // compressed-tensors kv_cache_scheme) overwrites this on load.
         kv_cache_k_scale = infinicore::nn::Parameter({1}, infinicore::DataType::F32, device, 0, 0, 1);
+        kv_cache_k_scale.load(infinicore::Tensor::ones({1}, infinicore::DataType::F32, device));
         register_fn("kv_cache_k_scale", kv_cache_k_scale);
         kv_cache_v_scale = infinicore::nn::Parameter({1}, infinicore::DataType::F32, device, 0, 0, 1);
+        kv_cache_v_scale.load(infinicore::Tensor::ones({1}, infinicore::DataType::F32, device));
         register_fn("kv_cache_v_scale", kv_cache_v_scale);
         break;
     default:

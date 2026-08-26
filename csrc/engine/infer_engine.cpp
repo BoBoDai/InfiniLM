@@ -262,7 +262,7 @@ InferEngine::Output InferEngine::forward(const InferEngine::Input &input) {
     for (auto &worker : workers_) {
         worker->wait();
     }
-
+        
     return workers_[0]->get_output();
 }
 
